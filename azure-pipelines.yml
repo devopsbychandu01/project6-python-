@@ -1,0 +1,77 @@
+name: mypipeline
+trigger: 
+  - master
+variables:
+  python.version: '3.8'
+  webAppName: 'devopsbychandu'
+  azureServiceConnectionId: 'myconnection'
+  projectRoot: $(System.DefaultWorkingDirectory)
+# pool:
+#   vmImage: ubuntu-latest
+pool: 
+  name: mypool
+stages:
+  - stage: CIStage
+    jobs:
+      - job: buildJob
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(python.version)'
+            displayName: 'Use Python $(pythonVersion)'
+          - script: |
+              python -m venv antenv
+              source antenv/bin/activate
+              python -m pip install --upgrade pip
+              pip install setup
+              pip install --target="./.python_packages/lib/site-packages" -r ./requirements.txt
+            workingDirectory: $(projectRoot)
+            displayName: "Install requirements"
+          # - task: ArchiveFiles@2
+          #   inputs:
+          #     rootFolderOrFile: '$(Build.SourcesDirectory)'
+          #     includeRootFolder: false
+          #     archiveType: 'zip'
+          #     archiveFile: '$(Build.ArtifactStagingDirectory)/Application$(Build.BuildId).zip'
+          #     replaceExistingArchive: true
+          #     verbose: # (no value); this input is optional
+          # - publish: $(Build.ArtifactStagingDirectory)/Application$(Build.BuildId).zip
+          #   displayName: 'Upload package'
+          #   artifact: drop
+
+          - script: zip -r myzip *
+            displayName: 'zip source code'
+
+          - task: CopyFiles@2
+            displayName: 'Copy Files to: $(build.artifactstagingdirectory)'
+            inputs:
+              SourceFolder: '$(system.defaultworkingdirectory)'
+              Contents: '*.zip'
+              TargetFolder: '$(build.artifactstagingdirectory)'
+            condition: succeededOrFailed()
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Artifact: drop'
+            inputs:
+              PathtoPublish: '$(build.artifactstagingdirectory)'
+              ArtifactName: 'drop'
+              publishLocation: 'Container'
+            condition: succeededOrFailed()
+
+  - stage: Deploy
+    displayName: 'Deploy Web App'
+    dependsOn: CIStage
+    condition: succeeded()
+    pool:
+      name: mypool
+    jobs:
+      - job:
+        steps:
+        - task: AzureRmWebAppDeployment@4
+          inputs:
+            ConnectionType: 'AzureRM'
+            azureSubscription: 'myconnection'
+            appType: 'webAppLinux'
+            WebAppName: 'devopsbychandu'
+            packageForLinux: '$(System.artifactstagingdirectory)/*.zip'
+            RuntimeStack: 'PYTHON|3.8'
